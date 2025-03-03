@@ -1,0 +1,330 @@
+local symbo = {}
+
+local NUM_INPUTS = 3
+local NUM_OUTPUTS = 2
+local STARTING_DEPTH = 3
+local POPULATION_SIZE = 1000
+local TOURNAMENT_SIZE = 7
+local MUTATION_RATE = 0.2
+local MAX_GENERATIONS = math.huge
+local BEST_POPULATION_SIZE = 100
+local MAX_MODEL_SIZE = 0
+local PARSIMONY = 0.001
+local PARSIMONY_INCREASING_FACTOR = 1.1
+local PARSIMONY_INCREASING_THRESHOLD = 0.1
+local SAVE_PERIOD = 30
+
+local random = math.random
+
+local primitives = {
+    {arity = 2, func = function(a,b) return a + b end},
+    {arity = 2, func = function(a,b) return a - b end},
+    {arity = 2, func = function(a,b) return a * b end},
+    {arity = 1, func = function(a) return math.sin(a) end},
+    {arity = 1, func = function(a) return math.cos(a) end},
+    {arity = 2, func = function(a,b) return a / (math.abs(b)+1e-9) end},
+
+    -- Additions: More basic arithmetic and operations
+    -- {arity = 2, func = function(a,b) return a ^ b end},
+    {arity = 2, func = function(a,b) return a % b end},
+    {arity = 2, func = function(a,b) return math.max(a, b) end}, 
+    {arity = 2, func = function(a,b) return math.min(a, b) end},
+
+    -- Trigonometric functions
+    -- {arity = 1, func = function(a) return math.tan(a) end}, 
+    -- {arity = 1, func = function(a) return math.asin(a) end},  
+    -- {arity = 1, func = function(a) return math.acos(a) end},
+    -- {arity = 1, func = function(a) return math.atan(a) end},
+    -- {arity = 2, func = function(a,b) return math.atan2(a, b) end}, 
+
+    -- Logarithmic and Exponential Functions
+    -- {arity = 1, func = function(a) return math.log(math.abs(a)) end}, 
+    -- {arity = 2, func = function(a,b) return math.log(math.abs(a), math.abs(b)) end},
+    -- {arity = 1, func = function(a) return math.exp(a) end}, 
+    -- {arity = 2, func = function(a,b) return math.pow(a, b) end},
+
+    -- Square Root and Absolute Value
+    -- {arity = 1, func = function(a)
+    --     if a < 0 then return -math.sqrt(math.abs(a)) end
+    --     return math.sqrt(math.abs(a)) 
+    -- end},
+    -- {arity = 1, func = function(a) return math.abs(a) end},
+
+    -- -- Hyperbolic functions
+    -- {arity = 1, func = function(a) return math.sinh(a) end},
+    -- {arity = 1, func = function(a) return math.cosh(a) end},
+    -- {arity = 1, func = function(a) return math.tanh(a) end},
+
+    -- -- Floor, Ceiling, and Fractional Part
+    -- {arity = 1, func = function(a) return math.floor(a) end},
+    -- {arity = 1, func = function(a) return math.ceil(a) end},
+    -- {arity = 1, func = function(a) return a - math.floor(a) end},
+
+    -- -- Statistical functions
+    -- {arity = 1, func = function(a) return a * a end},
+}
+
+local function create_node(value, children)
+    return {
+        value = value,
+        children = children
+    }
+end
+
+local function clone_node(node)
+    local children = {}
+    if node.children ~= nil then
+        for i, child in ipairs(node.children) do
+            table.insert(children, clone_node(child))
+        end
+    end
+    return create_node(node.value, children)
+end
+
+local function evaluate_node(node, inputs)
+    if type(node.value) == "function" then
+        local args = {}
+        for _, child in ipairs(node.children) do
+            table.insert(args, evaluate_node(child, inputs))
+        end
+        return node.value(unpack(args))
+    end
+    if string.sub(node.value, 1, 1) == "x" then
+        local index = tonumber(string.sub(node.value, 2))
+        return inputs[index] or 0
+    end
+    return tonumber(node.value)
+end
+
+local function generate_tree(max_depth)
+    if max_depth == 0  then
+        if random() < 0.5 then
+            return create_node("x" .. tostring(random(NUM_INPUTS)))
+        else
+            return create_node(tostring(random() * 4 -2))
+        end
+    else
+        local primitive = primitives[random(#primitives)]
+        local children = {}
+        for i = 1, primitive.arity do
+            children[i] = generate_tree(max_depth - 1)
+        end
+        return create_node(primitive.func, children)
+    end
+end
+
+local function generate_individuals()
+    local individuals = {}
+    for i = 1, NUM_OUTPUTS do
+        table.insert(individuals, generate_tree(STARTING_DEPTH))
+    end
+    return individuals
+end
+
+local function calculate_size(individual)
+    local size = 0
+    local function traverse(node)
+        size = size + 1
+        if node.children ~= nil then
+            for i, child in ipairs(node.children) do
+                traverse(child)
+            end
+        end
+    end
+    traverse(individual)
+    return size
+end
+
+local function fitness(individual, data)
+    local total_error = 0
+    local total_size = 0
+    for i = 1, NUM_OUTPUTS do
+        total_size = total_size + calculate_size(individual[i])
+    end
+    for i, point in ipairs(data) do
+        local outputs = {}
+        for i, tree in ipairs(individual) do
+            outputs[i] = evaluate_node(tree, point.inputs)
+        end
+
+        -- calculate error
+        for i, target in ipairs(point.outputs) do
+            local err = outputs[i] - target
+            total_error = total_error + err * err
+        end
+
+    end
+    local error = 0
+    if total_size > MAX_MODEL_SIZE then
+        error = total_error / (#data * NUM_OUTPUTS) + PARSIMONY * total_size
+    else
+        error = total_error / (#data * NUM_OUTPUTS)
+    end
+    return error, total_size / NUM_OUTPUTS
+end
+
+local function tournament_selection(population, fitnesses)
+    local best
+    for i = 1, TOURNAMENT_SIZE do
+        local candidate = population[random(#population)]
+        local score = fitnesses[candidate]
+
+        if not best or score < fitnesses[best] then
+            best = candidate
+        end
+    end
+    return best
+end
+
+local function crossover(a, b)
+    local new_a = {}
+    local new_b = {}
+
+    for i = 1, NUM_OUTPUTS do
+        local a_tree = clone_node(a[i])
+        local b_tree = clone_node(b[i])
+
+        local function get_all_nodes(tree)
+            local nodes = {}
+            local function traverse(node)
+                table.insert(nodes, node)
+                for i, child in ipairs(node.children) do
+                    traverse(child)
+                end
+            end
+            traverse(tree)
+            return nodes
+        end
+
+        local a_nodes = get_all_nodes(a_tree)
+        local b_nodes = get_all_nodes(b_tree)
+
+        if #a_nodes > 0 and #b_nodes > 0 then
+            local a_node = a_nodes[random(#a_nodes)]
+            local b_node = b_nodes[random(#b_nodes)]
+            a_node.value, b_node.value = b_node.value, a_node.value
+            a_node.children, b_node.children = b_node.children, a_node.children
+        end
+
+        table.insert(new_a, a_tree)
+        table.insert(new_b, b_tree)
+    end
+
+    return new_a, new_b
+end
+
+local function mutate(individual, size)
+    local mutated = {}
+    
+    for i, tree in ipairs(individual) do
+        local mutation_rate = MUTATION_RATE * (100 / calculate_size(tree))
+        local new_tree = clone_node(tree)
+
+        local function mutate_node(node)
+            if random() < mutation_rate then
+                if type(node.value) == "function" then
+                    local new_prim = primitives[random(#primitives)]
+                    if new_prim.arity == #node.children then
+                        node.value = new_prim.func
+                    end
+                else
+                    if random() < 0.5 then
+                        if random() < 0.7 then
+                            node.value = "x" .. tostring(random(NUM_INPUTS))
+                        else
+                            node.value = tostring(random() * 4 - 2)
+                        end
+                    end
+                end
+            end
+            for i, child in ipairs(node.children) do
+                mutate_node(child)
+            end
+        end
+        mutate_node(new_tree)
+        table.insert(mutated, new_tree)
+    end
+
+    return mutated
+end
+
+function symbo.print_individual(individual)
+    local function node_to_string(node)
+        if type(node.value) == "function" then
+            local args = {}
+            for _, child in ipairs(node.children) do
+                table.insert(args, node_to_string(child))
+            end
+            local func_map = {
+                [primitives[1].func] = "add",
+                [primitives[2].func] = "sub",
+                [primitives[3].func] = "mul",
+                [primitives[4].func] = "sin",
+                [primitives[5].func] = "cos",
+                [primitives[6].func] = "div"
+            }
+            local symbol = func_map[node.value] or "?"
+            return "(" .. table.concat(args, " " .. symbol .. " ") .. ")"
+        else
+            return node.value
+        end
+    end
+
+    for i, tree in ipairs(individual) do
+        print(("Output %d: %s"):format(i, node_to_string(tree)))
+    end
+end
+
+function symbo.regression(data)
+    local population = {}
+    for i = 1, POPULATION_SIZE do
+        table.insert(population, generate_individuals())
+    end
+
+    for generations = 1, MAX_GENERATIONS do
+        local fitnesses = {}
+        local sizes = {}
+        for i, individual in ipairs(population) do
+            fitnesses[individual], sizes[i] = fitness(individual, data)
+        end
+
+        table.sort(population, function(a, b) return fitnesses[a] < fitnesses[b] end)
+
+        local new_population = {}
+        for i = 1, BEST_POPULATION_SIZE do
+            table.insert(new_population, population[i])
+        end
+
+        while #new_population < POPULATION_SIZE do
+            local parent1 = tournament_selection(population, fitnesses)
+            local parent2 = tournament_selection(population, fitnesses)
+
+            local child1, child2 = crossover(parent1, parent2)
+            local size1 = calculate_size(child1)
+            
+            table.insert(new_population, mutate(child1))
+            if #new_population < POPULATION_SIZE then
+                table.insert(new_population, child2)
+            end
+        end
+
+        population = new_population
+
+        if fitnesses[population[1]] < PARSIMONY_INCREASING_THRESHOLD then
+            PARSIMONY = PARSIMONY * PARSIMONY_INCREASING_FACTOR
+            MAX_MODEL_SIZE = math.floor(MAX_MODEL_SIZE / PARSIMONY_INCREASING_FACTOR)
+        end
+
+        local total_size = 0
+        for i = 1, #sizes do
+            total_size = total_size + sizes[i]
+        end
+
+        print("Generation " .. generations .. " minimal error: " .. string.format("%.8f", fitnesses[population[1]]) .. " parsimony: " .. PARSIMONY .. " average size: " .. 
+        string.format("%.2f", total_size/#sizes) .. " best size: " .. sizes[1])
+    end
+
+    return population[1]
+end
+
+return symbo

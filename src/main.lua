@@ -3,12 +3,12 @@ local NUM_OUTPUTS = 2
 local STARTING_DEPTH = 3
 local POPULATION_SIZE = 10000
 local TOURNAMENT_SIZE = 7
-local MUTATION_RATE = 0.02
+local MUTATION_RATE = 0.05
 local MAX_GENERATIONS = 300
 local BEST_POPULATION_SIZE = 1000
-local MAX_TREE_SIZE = 10000
+local MAX_TREE_SIZE = 100
 local SIZE_DECREASING_FACTOR = 0.99
-local SIZE_DECREASING_THRESHOLD = 0.01
+local SIZE_DECREASING_THRESHOLD = 0.2
 
 local random = math.random
 
@@ -22,11 +22,11 @@ local primitives = {
     {arity = 1, func = function(a) return math.cos(a) end},
     {arity = 2, func = function(a,b) return a / (math.abs(b)+1e-9) end},
 
-    -- Additions: More basic arithmetic and operations
+        -- Additions: More basic arithmetic and operations
     -- {arity = 2, func = function(a,b) return a ^ b end},
-    -- {arity = 2, func = function(a,b) return a % b end},
-    -- {arity = 2, func = function(a,b) return math.max(a, b) end}, 
-    -- {arity = 2, func = function(a,b) return math.min(a, b) end},
+    {arity = 2, func = function(a,b) return a % b end},
+    {arity = 2, func = function(a,b) return math.max(a, b) end}, 
+    {arity = 2, func = function(a,b) return math.min(a, b) end},
 
     -- Trigonometric functions
     -- {arity = 1, func = function(a) return math.tan(a) end}, 
@@ -36,24 +36,27 @@ local primitives = {
     -- {arity = 2, func = function(a,b) return math.atan2(a, b) end}, 
 
     -- Logarithmic and Exponential Functions
-    -- {arity = 1, func = function(a) return math.log(a) end}, 
-    -- {arity = 2, func = function(a,b) return math.log(a, b) end},
+    -- {arity = 1, func = function(a) return math.log(math.abs(a)) end}, 
+    -- {arity = 2, func = function(a,b) return math.log(math.abs(a), math.abs(b)) end},
     -- {arity = 1, func = function(a) return math.exp(a) end}, 
     -- {arity = 2, func = function(a,b) return math.pow(a, b) end},
 
     -- Square Root and Absolute Value
-    -- {arity = 1, func = function(a) return math.sqrt(math.abs(a)) end},
-    -- {arity = 1, func = function(a) return math.abs(a) end},
+    {arity = 1, func = function(a)
+        if a < 0 then return -math.sqrt(math.abs(a)) end
+        return math.sqrt(math.abs(a)) 
+    end},
+    {arity = 1, func = function(a) return math.abs(a) end},
 
     -- Hyperbolic functions
-    -- {arity = 1, func = function(a) return math.sinh(a) end},
-    -- {arity = 1, func = function(a) return math.cosh(a) end},
-    -- {arity = 1, func = function(a) return math.tanh(a) end},
+    {arity = 1, func = function(a) return math.sinh(a) end},
+    {arity = 1, func = function(a) return math.cosh(a) end},
+    {arity = 1, func = function(a) return math.tanh(a) end},
 
     -- Floor, Ceiling, and Fractional Part
-    -- {arity = 1, func = function(a) return math.floor(a) end},
-    -- {arity = 1, func = function(a) return math.ceil(a) end},
-    -- {arity = 1, func = function(a) return a - math.floor(a) end},
+    {arity = 1, func = function(a) return math.floor(a) end},
+    {arity = 1, func = function(a) return math.ceil(a) end},
+    {arity = 1, func = function(a) return a - math.floor(a) end},
 
     -- Statistical functions
     -- {arity = 1, func = function(a) return a * a end},
@@ -216,15 +219,14 @@ local function crossover(a, b)
     return new_a, new_b
 end
 
-local function mutate(individual, size)
+local function mutate(individual)
     local mutated = {}
-    
+
     for i, tree in ipairs(individual) do
-        local mutation_rate = MUTATION_RATE * (100 / calculate_size(tree))
         local new_tree = clone_node(tree)
 
         local function mutate_node(node)
-            if random() < mutation_rate then
+            if random() < MUTATION_RATE then
                 if type(node.value) == "function" then
                     local new_prim = primitives[random(#primitives)]
                     if new_prim.arity == #node.children then
@@ -303,8 +305,6 @@ local function regression(data)
             local parent2 = tournament_selection(population, fitnesses)
 
             local child1, child2 = crossover(parent1, parent2)
-            local size1 = calculate_size(child1)
-            
             table.insert(new_population, mutate(child1))
             if #new_population < POPULATION_SIZE then
                 table.insert(new_population, child2)
@@ -322,7 +322,7 @@ local function regression(data)
             total_size = total_size + sizes[i]
         end
 
-        print("Generation " .. generations .. " minimal error: " .. string.format("%.2f", fitnesses[population[1]]) .. " max size: " .. MAX_TREE_SIZE .. " average size: " .. 
+        print("Generation " .. generations .. " minimal error: " .. string.format("%.8f", fitnesses[population[1]]) .. " max size: " .. MAX_TREE_SIZE .. " average size: " .. 
         string.format("%.2f", total_size/#sizes) .. " best size: " .. sizes[1])
     end
 
