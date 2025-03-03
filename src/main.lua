@@ -157,7 +157,7 @@ local function fitness(individual, data)
     -- size penalty
     for i, tree in ipairs(individual) do
         if sizes[i] > MAX_TREE_SIZE then
-            total_errors[i] = total_errors[i] * ((sizes[i] / MAX_TREE_SIZE) ^ 2)
+            total_errors[i] = total_errors[i] * ((sizes[i] / MAX_TREE_SIZE) ^ 2.5)
         end
     end
     local total_error = 0
