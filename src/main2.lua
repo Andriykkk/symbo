@@ -1,5 +1,3 @@
-local bdump = require "libs.bdump.src.bdump"
-
 local NUM_INPUTS = 4
 local NUM_OUTPUTS = 2
 local STARTING_DEPTH = 3
@@ -11,7 +9,6 @@ local BEST_POPULATION_SIZE = 10
 local MAX_TREE_SIZE = 1000
 local SIZE_DECREASING_FACTOR = 0.99
 local SIZE_DECREASING_THRESHOLD = 0.01
-local SAVE_INTERVAL = 30
 
 local random = math.random
 
@@ -45,21 +42,21 @@ local primitives = {
     -- {arity = 2, func = function(a,b) return math.pow(a, b) end},
 
     -- Square Root and Absolute Value
-    -- {arity = 1, func = function(a)
-    --     if a < 0 then return -math.sqrt(math.abs(a)) end
-    --     return math.sqrt(math.abs(a)) 
-    -- end},
-    -- {arity = 1, func = function(a) return math.abs(a) end},
+    {arity = 1, func = function(a)
+        if a < 0 then return -math.sqrt(math.abs(a)) end
+        return math.sqrt(math.abs(a)) 
+    end},
+    {arity = 1, func = function(a) return math.abs(a) end},
 
-    -- -- Hyperbolic functions
-    -- {arity = 1, func = function(a) return math.sinh(a) end},
-    -- {arity = 1, func = function(a) return math.cosh(a) end},
-    -- {arity = 1, func = function(a) return math.tanh(a) end},
+    -- Hyperbolic functions
+    {arity = 1, func = function(a) return math.sinh(a) end},
+    {arity = 1, func = function(a) return math.cosh(a) end},
+    {arity = 1, func = function(a) return math.tanh(a) end},
 
-    -- -- Floor, Ceiling, and Fractional Part
-    -- {arity = 1, func = function(a) return math.floor(a) end},
-    -- {arity = 1, func = function(a) return math.ceil(a) end},
-    -- {arity = 1, func = function(a) return a - math.floor(a) end},
+    -- Floor, Ceiling, and Fractional Part
+    {arity = 1, func = function(a) return math.floor(a) end},
+    {arity = 1, func = function(a) return math.ceil(a) end},
+    {arity = 1, func = function(a) return a - math.floor(a) end},
 
     -- Statistical functions
     -- {arity = 1, func = function(a) return a * a end},
@@ -134,6 +131,32 @@ local function calculate_size(individual)
     end
     traverse(individual)
     return size
+end
+
+local function fitness(individual, data)
+    local total_error = 0
+    local size = 0
+    for i = 1, NUM_OUTPUTS do
+        size = size + calculate_size(individual[i])
+    end
+    for i, point in ipairs(data) do
+        local outputs = {}
+        for i, tree in ipairs(individual) do
+            outputs[i] = evaluate_node(tree, point.inputs)
+        end
+
+        -- calculate error
+        for i, target in ipairs(point.outputs) do
+            local err = outputs[i] - target
+            total_error = total_error + err * err
+        end
+
+    end
+    -- size penalty
+    if size > MAX_TREE_SIZE then
+        total_error = total_error * ((size / MAX_TREE_SIZE) ^ 2.2)
+    end
+    return total_error / (#data * NUM_OUTPUTS), size / NUM_OUTPUTS
 end
 
 local function tournament_selection(population, fitnesses)
@@ -256,54 +279,21 @@ local function create_data()
         local x4 = random() * 10 - 5
         
         table.insert(data, {
-            inputs = {x1, x2, x3, x4}
+            inputs = {x1, x2, x3, x4},
+            outputs = {
+                x1 * x2 + math.sin(x3),
+                (x1 + x3) * 0.5 - x2
+            }
         })
     end
 
     return data
 end
 
-local function fitness(individual, data)
-    local total_error = 0
-    local size = 0
-    for i = 1, #individual.encoder do
-        size = size + calculate_size(individual.encoder[i])
-    end
-    for i = 1, #individual.decoder do
-        size = size + calculate_size(individual.decoder[i])
-    end
-
-    for i, point in ipairs(data) do
-        local outputs = {}
-        for i, tree in ipairs(individual.encoder) do
-            outputs[i] = evaluate_node(tree, point.inputs)
-        end
-        local decoded_outputs = {}
-        for i, tree in ipairs(individual.decoder) do
-            decoded_outputs[i] = evaluate_node(tree, outputs)
-        end
-
-        -- calculate error
-        for i, output in ipairs(decoded_outputs) do
-            local err = output - point.inputs[i]
-            total_error = total_error + err * err
-        end
-
-    end
-    -- size penalty
-    if size > MAX_TREE_SIZE then
-        total_error = total_error * ((size / MAX_TREE_SIZE) ^ 2.2)
-    end
-    return total_error / (#data * NUM_OUTPUTS), size / NUM_OUTPUTS
-end
-
 local function regression()
     local population = {}
     for i = 1, POPULATION_SIZE do
-        local individual = {encoder = {}, decoder = {}}
-        individual.encoder = generate_individuals()
-        individual.decoder = generate_individuals()
-        table.insert(population, individual)
+        table.insert(population, generate_individuals())
     end
 
     local data = create_data()
@@ -325,21 +315,14 @@ local function regression()
             table.insert(new_population, population[i])
         end
 
-        if generations % SAVE_INTERVAL == 0 then
-            for i = 1, #new_population do
-                bdump.save(new_population[i], "regression_" .. generations, i)
-            end
-        end
-
         while #new_population < POPULATION_SIZE do
             local parent1 = tournament_selection(population, fitnesses)
             local parent2 = tournament_selection(population, fitnesses)
-            
-            local encoder1, encoder2 = crossover(parent1.encoder, parent2.encoder)
-            local decoder1, decoder2 = crossover(parent1.decoder, parent2.decoder)
-            table.insert(new_population, {encoder = mutate(encoder1), decoder = mutate(decoder1)})
+
+            local child1, child2 = crossover(parent1, parent2)
+            table.insert(new_population, mutate(child1))
             if #new_population < POPULATION_SIZE then
-                table.insert(new_population, {encoder = mutate(encoder2), decoder = mutate(decoder2)})
+                table.insert(new_population, child2)
             end
         end
 
@@ -367,6 +350,4 @@ end
 local data = create_data()
 
 
--- local best = regression(data)
-
-print(bdump.load)
+local best = regression(data)
