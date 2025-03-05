@@ -1,0 +1,3 @@
+[submodule "src/libs/bdump"]
+	path = src/libs/bdump
+	url = https://github.com/Andriykkk/bdump.git
